@@ -1,23 +1,46 @@
 # 🌙 Nighttime Image Dehazing — NTIRE 2026
 
-A deep-learning based approach for **nighttime image dehazing**, developed for the **NTIRE 2026 Night Time Image Dehazing Challenge**.
+[![Challenge](https://img.shields.io/badge/NTIRE-2026-blue)]()
+[![Model](https://img.shields.io/badge/model-FFA--Net-orange)]()
+[![License](https://img.shields.io/badge/license-see%20LICENSE-lightgrey)](LICENSE)
 
-The project focuses on restoring clear nighttime images affected by haze, glow, non-uniform illumination, color distortion, and sensor noise. The primary restoration model implemented in this repository is **FFA-Net (Feature Fusion Attention Network)**, fine-tuned from pretrained indoor dehazing weights.
+A deep-learning approach for **nighttime image dehazing**, built for the **NTIRE 2026 Night Time Image Dehazing Challenge**. The project restores clear nighttime images affected by haze, glow, non-uniform illumination, color distortion, and sensor noise. The primary model is **FFA-Net (Feature Fusion Attention Network)**, fine-tuned from pretrained indoor-dehazing weights, with a secondary Restormer baseline and a simple weighted ensemble of the two.
+
+---
+
+## Table of Contents
+
+- [Problem](#-problem)
+- [Challenge](#-ntire-2026-challenge)
+- [Method](#-method)
+- [Training Pipeline](#-training-pipeline)
+- [Loss Function](#-loss-function)
+- [Evaluation Metrics](#-evaluation-metrics)
+- [Qualitative Results](#️-qualitative-results)
+- [Ensemble](#-ensemble)
+- [Installation](#-installation)
+- [Dataset Structure](#-dataset-structure)
+- [Training](#️-training)
+- [Checkpoints](#-checkpoints)
+- [Limitations](#-current-limitations)
+- [Project Structure](#-project-structure)
+- [Team](#-team)
+- [References](#-references)
 
 ---
 
 ## 📌 Problem
 
-Nighttime image dehazing is considerably more challenging than conventional daytime dehazing because nighttime scenes contain:
+Nighttime dehazing is harder than daytime dehazing because nighttime scenes contain:
 
 * 🌫️ Non-uniform haze and atmospheric scattering
-* 💡 Strong glow and halo around light sources
+* 💡 Strong glow and halos around light sources
 * 🌑 Extremely dark regions and low signal-to-noise ratios
-* 🎨 Color casts caused by low-light imaging
+* 🎨 Color casts from low-light imaging
 * 🔆 Coexisting overexposed and underexposed regions
 * 📷 Significant sensor noise
 
-These challenges are important for applications such as autonomous driving, surveillance, intelligent transportation systems, and downstream computer-vision tasks.
+These challenges matter for autonomous driving, surveillance, intelligent transportation, and downstream computer-vision tasks.
 
 ---
 
@@ -25,289 +48,148 @@ These challenges are important for applications such as autonomous driving, surv
 
 The challenge uses a small real-world paired nighttime dataset designed to test generalization.
 
-According to the project presentation:
-
 | Split      | Description                                |
-| ---------- | ------------------------------------------ |
+| ---------- | ------------------------------------------- |
 | Training   | 25 paired high-resolution nighttime images |
 | Validation | 5 paired images                            |
 | Test       | ~50+ hidden images                         |
-| Evaluation | PSNR, SSIM and LPIPS                       |
+| Evaluation | PSNR, SSIM, LPIPS                          |
 
-The dataset contains real nighttime haze, glow, noise, color casts, and pixel-level clear ground truth.
-
-Because the dataset is small, the project uses patch-based training and augmentation to increase the effective amount of training data.
+Because the dataset is small, the project relies on patch-based training and heavy augmentation to increase effective training data. See `factsheetntire.pdf` for the full challenge specification.
 
 ---
 
-# 🧠 Method
+## 🧠 Method
 
-## FFA-Net
+### FFA-Net
 
-The main restoration network is **FFA-Net — Feature Fusion Attention Network**.
+The main restoration network is **FFA-Net — Feature Fusion Attention Network**, implemented in `train.py`:
 
-The implementation uses:
-
-* **3 Groups**
-* **19 Blocks per Group**
-* **64 feature channels**
-* **Channel Attention (CA)**
-* **Pixel Attention (PA)**
-* Local residual connections
-* Group-level residual connections
+* 3 groups × 19 blocks per group (paper configuration)
+* 64 feature channels
+* Channel Attention (CA) + Pixel Attention (PA) per block
+* Local residual connections (per block and per group)
 * Global residual learning
-* Attention-based feature fusion
+* Attention-based fusion of the three group outputs
 
-The architecture follows the FFA-Net design implemented in `train.py`.
+<img src="FFA-Net pipeline.png" alt="FFA-Net pipeline" width="700">
 
-### Architecture
+<img src="Attention Layer.png" alt="Channel + Pixel attention layer" width="500">
 
-```text
-                     Hazy Image
-                          │
-                          ▼
-                  ┌──────────────┐
-                  │ Pre-Process  │
-                  │    3 → 64    │
-                  └──────┬───────┘
-                         │
-              ┌──────────▼──────────┐
-              │      Group 1        │
-              │   19 FFA Blocks     │
-              └──────────┬──────────┘
-                         │
-              ┌──────────▼──────────┐
-              │      Group 2        │
-              │   19 FFA Blocks     │
-              └──────────┬──────────┘
-                         │
-              ┌──────────▼──────────┐
-              │      Group 3        │
-              │   19 FFA Blocks     │
-              └──────────┬──────────┘
-                         │
-                  ┌──────▼──────┐
-                  │  Feature    │
-                  │   Fusion    │
-                  │     CA      │
-                  └──────┬──────┘
-                         │
-                  Pixel Attention
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │ Post-Process │
-                  │   64 → 3     │
-                  └──────┬───────┘
-                         │
-                         ▼
-                   Clear Image
-```
+Each block combines convolutional feature extraction with channel and pixel attention, letting the network focus on the regions that matter most in challenging nighttime scenes (glow, dark shadows, noisy patches).
 
-Each FFA block combines convolutional feature extraction with **channel attention and pixel attention**, allowing the network to focus on important features in challenging nighttime scenes.
+### Restormer baseline
+
+A Restormer U-Net variant is used as a secondary model for comparison and ensembling.
+
+<img src="Restormer U-NET.png" alt="Restormer U-Net" width="700">
 
 ---
 
-# 🔄 Training Pipeline
+## 🔄 Training Pipeline
 
 ```text
-Hazy / Ground Truth Image Pairs
-              │
-              ▼
-        Load into RAM
-              │
-              ▼
-        Random 256×256 Crop
-              │
-              ▼
-      Data Augmentation
-       ├── Horizontal Flip
-       ├── Vertical Flip
-       └── Random Rotation
-              │
-              ▼
-        FFA-Net
-              │
-              ▼
-       Predicted Image
-              │
-              ▼
-     Charbonnier Loss
-              │
-              ▼
-        Backpropagation
-              │
-              ▼
-        Adam Optimizer
-              │
-              ▼
-      Cosine LR Schedule
-              │
-              ▼
-     Full Image Evaluation
+Hazy / GT pairs → load into RAM → random 256×256 crop
+    → augmentation (h-flip, v-flip, random 90° rotation)
+    → FFA-Net → Charbonnier loss → backprop
+    → Adam + warmup/cosine LR → full-image validation every 5 epochs
 ```
 
-The current training configuration uses:
+| Parameter              |        Value |
+| ----------------------- | -----------: |
+| Patch size              |    256 × 256 |
+| Repeats per image/epoch |           50 |
+| Batch size              |            4 |
+| Epochs                  |           60 |
+| Initial learning rate   |     5 × 10⁻⁵ |
+| Warm-up                 |     3 epochs |
+| Optimizer               |         Adam |
+| Loss                    |  Charbonnier |
+| Gradient clipping       |          1.0 |
+| Mixed precision         |     CUDA AMP |
+| Multi-GPU               | DataParallel |
 
-| Parameter             |        Value |
-| --------------------- | -----------: |
-| Patch size            |    256 × 256 |
-| Repeats               |           50 |
-| Batch size            |            4 |
-| Epochs                |           60 |
-| Initial learning rate |     5 × 10⁻⁵ |
-| Warm-up               |     3 epochs |
-| Optimizer             |         Adam |
-| Loss                  |  Charbonnier |
-| Gradient clipping     |          1.0 |
-| Mixed precision       |     CUDA AMP |
-| Multi-GPU             | DataParallel |
-
-These settings are defined directly in `train.py`.
+All settings are defined at the top of `train.py`.
 
 ---
 
-# 🎯 Loss Function
+## 🎯 Loss Function
 
-The current implementation uses **Charbonnier Loss**:
+**Charbonnier Loss** (ε = 1e-6):
 
 ```text
 L(x, y) = mean( √((x - y)² + ε) )
 ```
 
-with:
-
-```text
-ε = 1e-6
-```
-
-Charbonnier loss is used as a robust pixel-level reconstruction objective.
-
-The challenge presentation also recommends strong pixel losses such as L1, together with structural, perceptual, color, and nighttime-specific losses for balancing PSNR, SSIM, and LPIPS.
+A robust, differentiable approximation of L1 used as the pixel-level reconstruction objective. The challenge factsheet also recommends combining a strong pixel loss (L1/Charbonnier) with structural, perceptual (LPIPS), color, and nighttime-specific losses to balance PSNR, SSIM, and LPIPS jointly — this is not yet implemented (see [Limitations](#-current-limitations)).
 
 ---
 
-# 📊 Evaluation Metrics
+## 📊 Evaluation Metrics
 
-The challenge evaluates restoration quality using three complementary metrics.
-
-### PSNR ↑
-
-Measures pixel-level fidelity between the restored image and ground truth.
-
-**Higher is better.**
-
-Typical interpretation from the project specification:
-
-```text
-< 15 dB       Very Poor
-15–20 dB      Poor
-20–25 dB      Acceptable
-25–30 dB      Good
-> 30 dB       Excellent
-```
-
-### SSIM ↑
-
-Measures structural similarity based on:
-
-* Luminance
-* Contrast
-* Local structure
-
-**Higher is better.**
-
-The project specification considers values above 0.85 excellent.
-
-### LPIPS ↓
-
-Measures perceptual distance using learned deep features.
-
-**Lower is better.**
-
-LPIPS is particularly useful for detecting perceptual artifacts, unnatural textures, color distortions, and overly aggressive dehazing that pixel metrics may not capture.
+| Metric | Direction | Notes |
+| ------ | :-------: | ----- |
+| **PSNR** | ↑ higher is better | Pixel-level fidelity. `<15 dB` very poor · `15–20` poor · `20–25` acceptable · `25–30` good · `>30` excellent |
+| **SSIM** | ↑ higher is better | Structural similarity (luminance, contrast, local structure). `>0.85` considered excellent |
+| **LPIPS** | ↓ lower is better | Learned-feature perceptual distance; catches artifacts and color/texture issues pixel metrics miss |
 
 ---
 
-# 🖼️ Qualitative Results
+## 🖼️ Qualitative Results
 
-Example comparison on:
-
-**`10_NTHazy.png`**
+Example comparison on `10_NTHazy.png`:
 
 | Method                 |         PSNR |       SSIM |
 | ---------------------- | -----------: | ---------: |
 | FFA-Net                | **23.54 dB** | **0.8287** |
 | Restormer              |     21.50 dB |     0.7247 |
 | Ensemble (0.65 / 0.35) | **23.70 dB** |     0.8190 |
-| Ground Truth           |            — |          — |
 
-From the shown example, FFA-Net produces a substantially clearer image than the hazy input while retaining nighttime illumination and scene structure.
+<img src="ensemble.png" alt="Hazy / FFA-Net / Restormer / Ensemble / GT comparison" width="800">
 
-The ensemble configuration achieves the highest PSNR in this displayed comparison, while FFA-Net achieves the highest SSIM among the listed learned methods.
+FFA-Net produces a substantially clearer image than the hazy input while preserving nighttime illumination and scene structure. The ensemble edges out the highest PSNR on this example; FFA-Net alone has the highest SSIM among the individual models.
 
-> **Note:** These values represent the displayed example result and should not be interpreted as the overall challenge/test-set score.
+> **Note:** These numbers are from a single displayed example, not the overall test-set score.
 
 ---
 
-# ⚖️ Ensemble
-
-A simple ensemble is also evaluated by combining the outputs of FFA-Net and another restoration model:
+## ⚖️ Ensemble
 
 ```text
 Ensemble = 0.65 × FFA-Net + 0.35 × Restormer
 ```
 
-For the displayed example:
-
-```text
-PSNR : 23.70 dB
-SSIM : 0.8190
-```
-
-The ensemble provides another way to balance the complementary restoration behavior of different architectures.
+For the example above: PSNR 23.70 dB, SSIM 0.8190. The ensemble is a simple way to combine the complementary restoration behavior of the two architectures without retraining.
 
 ---
 
-# 🚀 Pretrained Weights
+## 🚀 Pretrained Weights
 
-The FFA-Net implementation supports initialization from pretrained **ITS indoor dehazing weights**:
-
-```text
-its_train_ffa_3_19.pk
-```
-
-The training script expects:
+FFA-Net initializes from pretrained **ITS indoor dehazing weights** (`its_train_ffa_3_19.pk`):
 
 ```python
-PRETRAINED = "/kaggle/input/ffa-pretrained/its_train_ffa_3_19.pk"
+PRETRAINED = "/kaggle/input/ffa-pretrained/its_train_ffa_3_19.pk"  # edit to your path
 ```
 
-If the weights are unavailable, the script falls back to training from scratch.
+Download from the official FFA-Net weights (Google Drive folder linked at the top of `train.py`). If the file isn't found at that path, the script prints a warning and trains from scratch instead of failing.
 
 ---
 
-# 💻 Installation
+## 💻 Installation
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
-cd nighttime-image-dehazing
-```
+git clone https://github.com/ashvp/Dehazing---NTIRE-2026.git
+cd "Dehazing---NTIRE-2026"
 
-Install the required dependencies:
-
-```bash
 pip install torch torchvision
 pip install numpy pillow matplotlib tqdm scikit-image
 ```
 
-For Kaggle, the pretrained checkpoint can be downloaded before running training.
+`train.py` was written for Kaggle notebooks (paths default to `/kaggle/input/...` and `/kaggle/working/...`). To run elsewhere, update `TRAIN_DIR`, `GT_DIR`, `SAVE_DIR`, and `PRETRAINED` at the top of the script, and ensure a CUDA GPU is available (the script hardcodes `device = "cuda"`).
 
 ---
 
-# 📁 Dataset Structure
-
-The training script expects paired hazy and ground-truth images:
+## 📁 Dataset Structure
 
 ```text
 dataset/
@@ -315,208 +197,113 @@ dataset/
 │   ├── 01_NTHazy.png
 │   ├── 02_NTHazy.png
 │   └── ...
-│
 └── gt/
     ├── 01_GT.png
     ├── 02_GT.png
     └── ...
 ```
 
-The pairing convention used by the implementation is:
-
-```text
-_NTHazy → _GT
-```
-
-For example:
-
-```text
-10_NTHazy.png
-        ↓
-10_GT.png
-```
+Pairing convention: `<name>_NTHazy.png` ↔ `<name>_GT.png` (e.g. `10_NTHazy.png` → `10_GT.png`).
 
 ---
 
-# 🏋️ Training
+## 🏋️ Training
 
-Update the dataset paths in `train.py`:
+Edit the paths at the top of `train.py`:
 
 ```python
-TRAIN_DIR = "/path/to/train"
-GT_DIR    = "/path/to/gt"
-SAVE_DIR  = "/path/to/checkpoints"
+TRAIN_DIR  = "/path/to/train"
+GT_DIR     = "/path/to/gt"
+SAVE_DIR   = "/path/to/checkpoints"
+PRETRAINED = "/path/to/its_train_ffa_3_19.pk"
 ```
 
-Then run:
+Then:
 
 ```bash
 python train.py
 ```
 
-The training script:
+What it does:
 
-1. Loads paired images.
-2. Creates random 256×256 patches.
-3. Applies random flips and rotations.
-4. Fine-tunes FFA-Net.
-5. Uses mixed-precision CUDA training.
-6. Calculates training PSNR.
-7. Performs full-image validation every 5 epochs.
-8. Saves the best-performing model.
-9. Saves epoch checkpoints as `.pth` and `.zip`.
-10. Generates qualitative visualizations every 5 epochs.
+1. Loads all paired images into RAM.
+2. Generates random 256×256 crops (50 repeats/image/epoch).
+3. Applies random flips and 90° rotations.
+4. Fine-tunes FFA-Net with Charbonnier loss, Adam, and a warmup + cosine LR schedule.
+5. Trains with CUDA mixed precision and gradient clipping.
+6. Runs full-image validation every 5 epochs (PSNR + SSIM).
+7. Saves the best checkpoint by validation PSNR and per-epoch checkpoints (`.pth` + `.zip`).
+8. Plots hazy / GT / prediction comparisons every 5 epochs.
 
 ---
 
-# 💾 Checkpoints
-
-Checkpoints are stored in:
+## 💾 Checkpoints
 
 ```text
 checkpoints_ffa/
+├── ffa_best.pth          # best model by validation PSNR
+├── ffa_epoch_1.pth  / .zip
+├── ffa_epoch_2.pth  / .zip
+└── ...
 ```
-
-The best model is:
-
-```text
-ffa_best.pth
-```
-
-Epoch checkpoints follow:
-
-```text
-ffa_epoch_1.pth
-ffa_epoch_1.zip
-
-ffa_epoch_2.pth
-ffa_epoch_2.zip
-
-...
-```
-
-The best model is selected using validation PSNR.
 
 ---
 
-# 🔬 Current Limitations
+## 🔬 Current Limitations
 
-The current implementation is a strong FFA-Net baseline, but several improvements are possible.
+**1. Small dataset.** Only 25 real paired training images — overfitting is a real risk despite patch-based augmentation.
 
-### 1. Small dataset
+**2. Loss is pixel-only.** Currently just Charbonnier. Not yet included: SSIM loss, LPIPS/perceptual loss, color consistency loss, brightness realism loss, frequency/wavelet loss — all suggested directions from the challenge factsheet.
 
-The challenge dataset contains very few real paired images, making overfitting a major concern.
-
-### 2. Current loss is primarily pixel-based
-
-The current code uses Charbonnier loss. It does not currently include explicit:
-
-* SSIM loss
-* LPIPS/perceptual loss
-* Color consistency loss
-* Brightness realism loss
-* Frequency/wavelet loss
-
-These are potential directions suggested by the project design.
-
-### 3. Validation implementation
-
-The current `train.py` constructs `val_files` from `TRAIN_DIR`:
+**3. Validation uses the training set.** `train.py` builds `val_files` from `TRAIN_DIR`:
 
 ```python
 val_files = sorted(os.listdir(TRAIN_DIR))
 ```
 
-Therefore, unless the dataset directory itself has been arranged differently, the current script evaluates the full images from the training directory rather than a separate held-out validation directory.
-
-For a reliable experiment, a separate validation directory should be used.
+So "validation" currently evaluates full images from the training directory, not a held-out split. Point `TRAIN_DIR`/`GT_DIR` at a genuinely separate validation directory (or add a dedicated `VAL_DIR`/`VAL_GT_DIR`) for a trustworthy PSNR/SSIM curve.
 
 ---
 
-# 📚 Project Structure
+## 📚 Project Structure
 
 ```text
-nighttime-image-dehazing/
-│
+Dehazing---NTIRE-2026/
 ├── train.py
 ├── README.md
-│
+├── LICENSE
+├── factsheetntire.pdf
+├── FFA-Net pipeline.png
+├── Attention Layer.png
+├── Restormer U-NET.png
+├── ensemble.png
 ├── dataset/
 │   ├── train/
 │   └── gt/
-│
-├── checkpoints/
-│   ├── ffa_best.pth
-│   └── ...
-│
-└── results/
-    ├── qualitative/
-    └── metrics/
+└── checkpoints_ffa/
+    └── ffa_best.pth
 ```
 
 ---
 
-# 📈 Experimental Summary
-
-### FFA-Net
-
-```text
-Architecture:
-    3 Groups × 19 Blocks
-    64 feature channels
-    Channel Attention
-    Pixel Attention
-
-Training:
-    Patch Size      : 256 × 256
-    Batch Size      : 4
-    Epochs          : 60
-    Learning Rate   : 5e-5
-    Optimizer       : Adam
-    Loss            : Charbonnier
-    Scheduler       : Warmup + Cosine Decay
-```
-
-### Example Result
-
-```text
-FFA-Net
-PSNR : 23.54 dB
-SSIM : 0.8287
-
-Restormer
-PSNR : 21.50 dB
-SSIM : 0.7247
-
-Ensemble (0.65 FFA + 0.35 Restormer)
-PSNR : 23.70 dB
-SSIM : 0.8190
-```
-
----
-
-# 👥 Team
+## 👥 Team
 
 **NTIRE 2026 Nighttime Image Dehazing Challenge**
 
-This project is developed as part of an image and video processing research project focused on robust nighttime image restoration.
+- Ashwin V
+- Madhu Shraya
+- Aditya Kumar
 
-Members:
-Ashwin V
-Madhu Shraya
-Aditya Kumar
 ---
 
-# 📖 References
+## 📖 References
 
-* NTIRE 2026 Night Time Image Dehazing Challenge — project specification and evaluation framework.
-* FFA-Net: Feature Fusion Attention Network for Single Image Dehazing.
-* FFA-Net implementation used in this project.
+* NTIRE 2026 Night Time Image Dehazing Challenge — project specification and evaluation framework (`factsheetntire.pdf`).
+* Qin, X. et al., *FFA-Net: Feature Fusion Attention Network for Single Image Dehazing*, AAAI 2020.
+* Zamir, S. W. et al., *Restormer: Efficient Transformer for High-Resolution Image Restoration*, CVPR 2022.
 
 ---
 
 ## ⭐ Key Takeaway
 
-The project explores **attention-based nighttime image dehazing using FFA-Net**, with patch-based training, augmentation, pretrained initialization, mixed-precision optimization, and PSNR/SSIM-based evaluation.
-
-The initial qualitative experiment demonstrates that FFA-Net can significantly improve visibility in nighttime hazy scenes while preserving scene structure and realistic illumination.
+Attention-based nighttime dehazing with FFA-Net, using patch-based training, augmentation, pretrained ITS initialization, mixed-precision optimization, and PSNR/SSIM evaluation — plus a Restormer baseline and a weighted ensemble. The initial experiments show FFA-Net meaningfully improving visibility in nighttime hazy scenes while preserving scene structure and realistic illumination.
