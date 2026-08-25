@@ -433,30 +433,6 @@ For a reliable experiment, a separate validation directory should be used.
 
 ---
 
-# 🔮 Future Improvements
-
-Potential extensions include:
-
-* [ ] Add SSIM loss
-* [ ] Add perceptual/VGG loss
-* [ ] Add LPIPS-based evaluation
-* [ ] Add brightness realism loss
-* [ ] Add color consistency loss
-* [ ] Add frequency-domain/wavelet loss
-* [ ] Add nighttime-specific glow suppression
-* [ ] Improve noise removal
-* [ ] Use a dedicated validation split
-* [ ] Experiment with Restormer
-* [ ] Improve FFA-Net + Restormer ensemble
-* [ ] Test external/synthetic pretraining
-* [ ] Perform test-time augmentation
-* [ ] Add EMA model weights
-* [ ] Compare multiple loss combinations
-
-The challenge presentation specifically highlights color-aware losses, denoising, frequency-domain approaches, brightness realism, and perceptual losses as promising directions.
-
----
-
 # 📚 Project Structure
 
 ```text
@@ -525,6 +501,10 @@ SSIM : 0.8190
 
 This project is developed as part of an image and video processing research project focused on robust nighttime image restoration.
 
+Members:
+Ashwin V
+Madhu Shraya
+Aditya Kumar
 ---
 
 # 📖 References
