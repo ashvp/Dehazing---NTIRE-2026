@@ -52,7 +52,7 @@ The challenge uses a small real-world paired nighttime dataset designed to test 
 | ---------- | ------------------------------------------- |
 | Training   | 25 paired high-resolution nighttime images |
 | Validation | 5 paired images                            |
-| Test       | ~50+ hidden images                         |
+| Test       | 5 hidden images                         |
 | Evaluation | PSNR, SSIM, LPIPS                          |
 
 Because the dataset is small, the project relies on patch-based training and heavy augmentation to increase effective training data. See `factsheetntire.pdf` for the full challenge specification.
